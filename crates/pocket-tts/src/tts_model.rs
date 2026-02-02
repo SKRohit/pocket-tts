@@ -542,12 +542,15 @@ impl TTSModel {
     /// Run flow LM with audio conditioning (used during prompting)
     fn run_flow_lm_prompt(&self, conditioning: &Tensor, state: &mut ModelState) -> Result<()> {
         // Empty text tokens and backbone input
-        let empty_text = Tensor::zeros((1, 0), DType::I64, &self.device)?;
-        let text_embeddings = self.conditioner.forward(&empty_text)?;
-
-        // Concatenate text embeddings and audio conditioning
-        // Match Python/reference order: audio conditioning comes before text embeddings.
-        let input = Tensor::cat(&[conditioning, &text_embeddings], 1)?;
+        // metal backend cannot handle zero-dim tensors
+        // Issue: https://github.com/huggingface/candle/issues/3353
+        let input = if self.device.is_metal() {
+            conditioning.clone()
+        } else {
+            let empty_text = Tensor::zeros((1, 0), DType::I64, &self.device)?;
+            let text_embeddings = self.conditioner.forward(&empty_text)?;
+            Tensor::cat(&[conditioning, &text_embeddings], 1)?;
+        };
 
         // Run through transformer (no generation, just prompting)
         // With custom SDPA, this is now memory efficient
